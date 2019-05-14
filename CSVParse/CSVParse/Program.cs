@@ -7,6 +7,7 @@ using System.IO;
 using Microsoft.VisualBasic.FileIO;
 using Excel = Microsoft.Office.Interop.Excel;
 using System.Data.SqlClient;
+using System.Windows.Forms;
 
 namespace CSVParse
 {
@@ -14,7 +15,8 @@ namespace CSVParse
     {
         static void Main(string[] args)
         {
-            string dirPath = @"K:\ImportSource";
+            //string dirPath = @"K:\ImportSource Rebates";
+            string dirPath = @"K:\ImportSource Trace";
             //string filePath; Test
             //string fileFormat;
             //string indexString;
@@ -24,22 +26,41 @@ namespace CSVParse
             //string dateFormat;
             //int startRow;
 
-            month = "MAY";
-            year = "2016";
+            //Set Month and Year
+            month =  "APRIL"; //"MAY"; //"JUNE"; //"JULY"; //"AUGUST"; //"SEPTEMBER"; //"OCTOBER"; //"NOVEMBER"; //"DECEMBER"; //"JANUARY"; //"FEBRUARY"; //"MARCH"; //
+            year = "2019";//"2018";//"2017";//"2014";//"2015";//
 
             try
             {
-                List<string> dirs = new List<string>(Directory.EnumerateDirectories(dirPath));
+                DialogResult answer;
+                answer = MessageBox.Show("Run Validate - Choose Yes; Import - Choose No; Else Cancel", "Validate or Import", MessageBoxButtons.YesNoCancel);
 
-                foreach (var dir in dirs)
+                if (answer != DialogResult.Cancel)
                 {
-                    //if (!ValidateDir(dir))
-                    //{
-                    //    throw new Exception("INVALID");
-                    //}
-                    ProcessDir(dir, year, month);
+                    List<string> dirs = new List<string>(Directory.EnumerateDirectories(dirPath));
+                    foreach (var dir in dirs)
+                    {
+                        if (answer == DialogResult.Yes)
+                        {
+                            if (!ValidateDir(dir))
+                            {
+                                Console.WriteLine("  {0} is invalid.", dir);
+                            }
+                            else
+                            {
+                                ProcessDir(dir, year, month);
+                            }
+                        }
+                        //if (answer == DialogResult.No)
+                        //{
+                        //    ProcessDir(dir, year, month);
+
+                        //}
+                    }
+                    Console.WriteLine("{0} directories found.", dirs.Count);
+
                 }
-                Console.WriteLine("{0} directories found.", dirs.Count);
+
             }
             catch (UnauthorizedAccessException UAEx)
             {
@@ -57,16 +78,18 @@ namespace CSVParse
 
         static bool ValidateDir(string directory)
         {
-            bool isValid = false;
+            bool isValid = true;
             string[] fileEntries = Directory.GetFiles(directory);
             if (fileEntries.Length > 0)
             {
+                isValid = false;
                 string dirName = directory.Substring(directory.LastIndexOf("\\") + 1);
                 Profile profile = GetProfile(dirName);
                 if (profile != null)
                 {
                     foreach (string fileName in fileEntries)
                     {
+                        Console.WriteLine("Validating {0}.", fileName);
                         isValid = true;
                         if (!ValidateFile(profile, fileName))
                         {
@@ -83,6 +106,7 @@ namespace CSVParse
 
         static bool ValidateFile(Profile profile, string fileName)
         {
+            //TODO - Get Actual Headers then compare to Expected and update if just moved around
             bool isValid = false;
 
             if (profile.FileFormat == "EXCEL")
@@ -165,6 +189,7 @@ namespace CSVParse
             bool isValid = true;
             string[] headersExpected = profile.Headers.Split('~');
 
+            
             Excel.Application xlApp;
             Excel.Workbook xlWorkBook;
             Excel.Worksheet xlWorkSheet;
@@ -206,17 +231,42 @@ namespace CSVParse
             if (fileEntries.Length > 0)
             {
                 string dirName = directory.Substring(directory.LastIndexOf("\\") + 1);
+                string dirProcessed = directory + "\\Processed";
+                string dirError = directory + "\\Error";
                 Profile profile = GetProfile(dirName);
                 if (profile != null)
                 {
                     foreach (string fileName in fileEntries)
                     {
                         //                    ProcessFile(dirName, fileType, fileFormat, headerRow, dateFormat, headers, mapping, fileName, year, month);
-                        ProcessFile(profile, fileName, year, month);
+                        try
+                        {
+                            ProcessFile(profile, fileName, year, month);
+                            MoveFile(fileName, directory, "Processed");
+                        }
+                        catch
+                        {
+                            MoveFile(fileName, directory, "Error");
+                        }
+
+
                     }
 
                 }
             }
+        }
+
+        static void MoveFile(string fileName, string directory, string status)
+        {
+            string destDir = directory + "\\" +status;
+            string destFile = fileName.Replace(directory, destDir);
+            if (!Directory.Exists(destDir))
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            Directory.Move(fileName, destFile);
+
         }
         static Profile GetProfile(string directory)
         {
@@ -232,7 +282,7 @@ namespace CSVParse
                     connection.Open();
                     SqlCommand cmd = new System.Data.SqlClient.SqlCommand();
                     cmd.CommandType = System.Data.CommandType.Text;
-                    cmd.CommandText = "SELECT [ProfileSettingID],[ProfileID],[FileType],[FileFormat],[HeaderRow],[DateFormat],[Headers],[Mapping],[Folder] FROM[dbo].[ProfileSetting] WHERE [Folder] = @P0";
+                    cmd.CommandText = "SELECT [ProfileSettingID],[ProfileID],[FileType],[FileFormat],[HeaderRow],[StartRow],[DateFormat],[Headers],[Mapping],[Folder] FROM[dbo].[ProfileSetting] WHERE [Folder] = @P0";
                     cmd.Parameters.AddWithValue("@P0", directory);
                     cmd.Connection = connection;
 
@@ -247,9 +297,18 @@ namespace CSVParse
                             profile.FileType = reader.GetString(2);
                             profile.FileFormat = reader.GetString(3);
                             profile.HeaderRow = reader.GetInt32(4);
-                            profile.DateFormat = reader.GetString(5);
-                            profile.Headers = reader.GetString(6);
-                            profile.Mapping = reader.GetString(7);
+                            //profile.StartRow = reader.GetInt32(5);
+                            if (reader.IsDBNull(5))
+                            {
+                                profile.StartRow = profile.HeaderRow + 1;
+                            }
+                            else
+                            {
+                                profile.StartRow = reader.GetInt32(5);
+                            }
+                            profile.DateFormat = reader.GetString(6);
+                            profile.Headers = reader.GetString(7);
+                            profile.Mapping = reader.GetString(8);
                         }
                     }
                     else
@@ -273,6 +332,7 @@ namespace CSVParse
             public string FileType { get; set; }
             public string FileFormat { get; set; }
             public int HeaderRow { get; set; }
+            public int StartRow { get; set; }
             public string DateFormat { get; set; }
             public string Headers { get; set; }
             public string Mapping { get; set; }
@@ -285,11 +345,11 @@ namespace CSVParse
 
             if (profile.FileFormat == "EXCEL")
             {
-                LoadExcel(fileName, profile.ProfileID, profile.Mapping, profile.HeaderRow + 1, month, year, profile.DateFormat);
+                LoadExcel(fileName, profile.ProfileID, profile.Mapping, profile.StartRow, month, year, profile.DateFormat, profile.FileType);
             }
             else
             {
-                LoadFile(fileName, profile.FileFormat, profile.ProfileID, profile.Mapping, profile.HeaderRow + 1, month, year);
+                LoadFile(fileName, profile.FileFormat, profile.ProfileID, profile.Mapping, profile.StartRow, month, year, profile.FileType);
             }
 
         }
@@ -314,24 +374,24 @@ namespace CSVParse
             startRow = 3;
             dateFormat = "D";
             customerCode = "MOORE";
-            LoadExcel(filePath, customerCode, indexString, startRow, month, year, dateFormat);
+            LoadExcel(filePath, customerCode, indexString, startRow, month, year, dateFormat,"");
 
             indexString = ",,,7,,,,,8,9,0,,,,,,,,,,,1,3,,5,,6,,,,4,,,,,,,,,,";
             fileFormat = "CSV";
             filePath = @"K:\CSV\CSV.csv";
             startRow = 3;
             customerCode = "MOORE";
-            LoadFile(filePath, fileFormat, customerCode, indexString, startRow, month, year);
+            LoadFile(filePath, fileFormat, customerCode, indexString, startRow, month, year,"");
             //LoadCsv(filePath);
 
             fileFormat = "TAB";
             filePath = @"K:\Tab\Tab.csv";
             indexString = "0,29";
-            LoadFile(filePath, fileFormat, customerCode, indexString, startRow, month, year);
+            LoadFile(filePath, fileFormat, customerCode, indexString, startRow, month, year,"");
             //LoadTab(filePath);
         }
 
-        static void LoadFile(string filePath, string fileFormat, string customerCode, string indexString, int startRow, string month, string year)
+        static void LoadFile(string filePath, string fileFormat, string customerCode, string indexString, int startRow, string month, string year, string fileType)
         {
             FileStream stream = File.Open(filePath, FileMode.Open);
             StreamReader reader = new StreamReader(stream);
@@ -364,7 +424,7 @@ namespace CSVParse
                         if (rowCount >= startRow)
                         {
                             bool inserted;
-                            inserted = InsertRow(fieldArray, customerCode, indexes, month, year, "S");
+                            inserted = InsertRow(fieldArray, customerCode, indexes, month, year, "S", fileType);
                             if (!inserted)
                                 break;
                         }
@@ -379,7 +439,7 @@ namespace CSVParse
             reader.Close();
         }
 
-        static bool InsertRow(string[] fieldArray, string customerCode, string[] indexes, string month, string year, string dateFormat)
+        static bool InsertRow(string[] fieldArray, string customerCode, string[] indexes, string month, string year, string dateFormat, string fileType)
         {
             int length = 41;
             string[] insertSource = new string[length];
@@ -403,7 +463,7 @@ namespace CSVParse
                     connection.Open();
                     SqlCommand cmd = new System.Data.SqlClient.SqlCommand();
                     cmd.CommandType = System.Data.CommandType.Text;
-                    cmd.CommandText = getSql(customerCode, insertSource, month, year);
+                    cmd.CommandText = getSql(customerCode, insertSource, month, year, fileType);
                     AddParameters(cmd, customerCode, insertSource, month, year, dateFormat);
                     cmd.Connection = connection;
                     cmd.ExecuteNonQuery();
@@ -434,7 +494,7 @@ namespace CSVParse
 
         }
 
-        static string getSql(string customerCode, string[] insertSource, string month, string year)
+        static string getSql(string customerCode, string[] insertSource, string month, string year, string fileType)
         {
             string sql = @"INSERT INTO [dbo].[TraceImport] 
            ([PROFILE_ID] 
@@ -482,7 +542,12 @@ namespace CSVParse
             @P0, @P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9,@P10, @P11, @P12, @P13, @P14, @P15, @P16, @P17, @P18, @P19,
             @P20, @P21, @P22, @P23, @P24, @P25, @P26, @P27, @P28, @P29,@P30, @P31, @P32, @P33, @P34, @P35, @P36, @P37, @P38, @P39, @P40)";
 
-            return sql.Replace("\r", "").Replace("\n", "");
+
+            if (fileType == "T")
+                return sql.Replace("\r", "").Replace("\n", "");
+            else
+                return sql.Replace("\r", "").Replace("\n", "").Replace("[TraceImport]", "[TraceImportRebate]");
+
         }
 
         static void AddParameters(SqlCommand cmd, string customerCode, string[] insertSource, string month, string year, string dateFormat)
@@ -546,7 +611,7 @@ namespace CSVParse
             }
             catch (Exception ex)
             {
-
+                //Console.WriteLine(ex.Message);
             }
             if (str == string.Empty)
                 str = numberString;
@@ -652,7 +717,7 @@ namespace CSVParse
 
         //}
 
-        static void LoadExcel(string filePath, string customerCode, string indexString, int startRow, string month, string year, string dateFormat)
+        static void LoadExcel(string filePath, string customerCode, string indexString, int startRow, string month, string year, string dateFormat, string fileType)
         {
             Excel.Application xlApp;
             Excel.Workbook xlWorkBook;
@@ -676,26 +741,38 @@ namespace CSVParse
 
             range = xlWorkSheet.UsedRange;
 
-            string[] fieldArray = new string[range.Columns.Count];
-            for (rCnt = startRow; rCnt <= range.Rows.Count; rCnt++)
-            {
-                for (cCnt = 1; cCnt <= range.Columns.Count; cCnt++)
+            try { 
+
+                string[] fieldArray = new string[range.Columns.Count];
+                for (rCnt = startRow; rCnt <= range.Rows.Count; rCnt++)
                 {
-                    str = getCellValue(range, rCnt, cCnt);
-                    fieldArray[cCnt - 1] = str;
+                    for (cCnt = 1; cCnt <= range.Columns.Count; cCnt++)
+                    {
+                        str = getCellValue(range, rCnt, cCnt);
+                        fieldArray[cCnt - 1] = str;
+                    }
+                    bool inserted;
+                    inserted = InsertRow(fieldArray, customerCode, indexes, month, year, dateFormat, fileType);
+                    if (!inserted)
+                        break;
                 }
-                bool inserted;
-                inserted = InsertRow(fieldArray, customerCode, indexes, month, year, dateFormat);
-                if (!inserted)
-                    break;
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+
+            }
+            finally
+            {
+                xlWorkBook.Close(false);
+                xlApp.Quit();
+
+                releaseObject(xlWorkSheet);
+                releaseObject(xlWorkBook);
+                releaseObject(xlApp);
             }
 
-            xlWorkBook.Close(false);
-            xlApp.Quit();
-
-            releaseObject(xlWorkSheet);
-            releaseObject(xlWorkBook);
-            releaseObject(xlApp);
 
         }
         static void releaseObject(object obj)
@@ -726,6 +803,8 @@ namespace CSVParse
                 return string.Empty;
             }
         }
+
+        
 
     }
 }
